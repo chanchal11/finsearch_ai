@@ -2,6 +2,12 @@
 
 Production-oriented, **SOLID** multi-agent investment research engine built with the [Strands Agents SDK](https://strandsagents.com/), Alpha Vantage, Tavily, and an in-memory TTL cache. The same orchestration core runs unchanged behind **Streamlit** (interactive streaming UI) or **FastAPI** (REST + SSE).
 
+## Streamlit UI preview
+
+![Investment Committee Terminal — Streamlit UI](screenshots/investment-committee-terminal.png)
+
+The sidebar shows API configuration status and cache keys; the main panel accepts a ticker and peer set for a live multi-agent committee run.
+
 ## Architecture
 
 | Layer | Responsibility |
