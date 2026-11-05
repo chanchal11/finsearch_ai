@@ -11,7 +11,14 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    financial_data_provider: str = Field(
+        default="yfinance", alias="FINANCIAL_DATA_PROVIDER"
+    )
     alpha_vantage_api_key: str = Field(default="", alias="ALPHA_VANTAGE_API_KEY")
+    fmp_api_key: str = Field(default="", alias="FMP_API_KEY")
+    fmp_base_url: str = Field(
+        default="https://financialmodelingprep.com/stable", alias="FMP_BASE_URL"
+    )
     tavily_api_key: str = Field(default="", alias="TAVILY_API_KEY")
     strands_provider: str = Field(default="bedrock", alias="STRANDS_PROVIDER")
     strands_model: str = Field(
@@ -27,12 +34,22 @@ class Settings(BaseSettings):
     cache_default_ttl: int = Field(default=3600, alias="CACHE_DEFAULT_TTL")
     cache_max_size: int = Field(default=512, alias="CACHE_MAX_SIZE")
 
+    @property
+    def financial_source(self) -> str:
+        return self.financial_data_provider.strip().lower()
+
     def api_key_status(self) -> dict[str, bool]:
-        status = {
-            "Alpha Vantage": bool(self.alpha_vantage_api_key),
-            "Tavily": bool(self.tavily_api_key),
-            "Strands model": bool(self.strands_model),
-        }
+        """Readiness of each credential the active configuration depends on."""
+        status: dict[str, bool] = {}
+        source = self.financial_source
+        if source == "alphavantage":
+            status["Alpha Vantage (market data)"] = bool(self.alpha_vantage_api_key)
+        elif source == "fmp":
+            status["Financial Modeling Prep (market data)"] = bool(self.fmp_api_key)
+        else:
+            status["Yahoo Finance (market data)"] = True
+        status["Tavily"] = bool(self.tavily_api_key)
+        status["Strands model"] = bool(self.strands_model)
         if self.strands_provider.strip().lower() == "groq":
             status["Groq"] = bool(self.groq_api_key)
         return status

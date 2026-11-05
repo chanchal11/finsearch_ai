@@ -1,4 +1,4 @@
-from src.providers.alpha_vantage import AlphaVantageProvider
+from src.providers.factory import build_financial_provider
 from src.providers.tavily_news import TavilyNewsProvider
 
-__all__ = ["AlphaVantageProvider", "TavilyNewsProvider"]
+__all__ = ["TavilyNewsProvider", "build_financial_provider"]

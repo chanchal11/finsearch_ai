@@ -21,7 +21,8 @@ def _coerce_float(value: object) -> float | None:
     if value is None:
         return None
     if isinstance(value, (int, float)):
-        return float(value)
+        number = float(value)
+        return number if number == number else None  # NaN becomes missing
     text = str(value).replace(",", "").strip()
     if not text or text.lower() in {"none", "nan", "-"}:
         return None

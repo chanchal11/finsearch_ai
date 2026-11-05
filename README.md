@@ -1,6 +1,6 @@
 # Investment Agent App
 
-Production-oriented, **SOLID** multi-agent investment research engine built with the [Strands Agents SDK](https://strandsagents.com/), Alpha Vantage, Tavily, and an in-memory TTL cache. The same orchestration core runs unchanged behind **Streamlit** (interactive streaming UI) or **FastAPI** (REST + SSE).
+Production-oriented, **SOLID** multi-agent investment research engine built with the [Strands Agents SDK](https://strandsagents.com/), a switchable market-data source (Yahoo Finance, Financial Modeling Prep, or Alpha Vantage), Tavily, and an in-memory TTL cache. The same orchestration core runs unchanged behind **Streamlit** (interactive streaming UI) or **FastAPI** (REST + SSE).
 
 ## Streamlit UI preview
 
@@ -65,7 +65,6 @@ uv sync --all-groups         # install from lock
 
 ### Required environment
 
-- `ALPHA_VANTAGE_API_KEY`
 - `TAVILY_API_KEY`
 - `STRANDS_PROVIDER` — `bedrock` (default), `ollama`, or `groq`
 - `STRANDS_MODEL` — Bedrock model id, an Ollama model name such as `llama3.1`, or a Groq model id such as `llama-3.3-70b-versatile`
@@ -73,6 +72,24 @@ uv sync --all-groups         # install from lock
 - `GROQ_API_KEY` — required when `STRANDS_PROVIDER=groq`
 - `GROQ_BASE_URL` — Groq OpenAI-compatible endpoint (default `https://api.groq.com/openai/v1`)
 - Provider credentials matching your model (AWS for Bedrock; Ollama needs the server running and the model pulled)
+
+### Market data source
+
+Choose the vendor with one line in `.env`, then restart the app (settings are read once at startup):
+
+```env
+FINANCIAL_DATA_PROVIDER=yfinance   # yfinance | fmp | alphavantage
+```
+
+| Value | Key needed | Notes |
+| --- | --- | --- |
+| `yfinance` (default) | none | Unofficial Yahoo Finance source. Roughly four annual statements. Coverage and availability can change without notice. |
+| `fmp` | `FMP_API_KEY` | [Financial Modeling Prep](https://site.financialmodelingprep.com/) `/stable` API. Override the host with `FMP_BASE_URL`. Forward P/E is a paid FMP feature, so the dashboard shows trailing P/E instead. The free plan limits statement depth and symbol coverage. |
+| `alphavantage` | `ALPHA_VANTAGE_API_KEY` | Strict free-tier rate limits. |
+
+Every option implements the same `IFinancialDataProvider` interface and returns the same column names, so tools, agents, and the dashboard behave identically. The sidebar shows the active source. An unknown value stops startup with the list of allowed names.
+
+To add a vendor, write one adapter that translates its payload with the helpers in `src/providers/schema.py` and register it in `src/providers/factory.py`.
 
 ## Run Streamlit UI
 
@@ -84,7 +101,7 @@ PowerShell: same command (`uv run` works on Windows).
 
 Features: shared ticker and peers input, decision dashboard, live committee streaming with specialist tool status, per-session research chat, cache inspection and purge.
 
-Alpha Vantage's free tier limits requests per minute. The dashboard loads in sections; if a call is rate limited, that section shows as a data gap with a retry button and everything already loaded stays cached. Peers are capped at four.
+Vendors can rate limit requests (Alpha Vantage most strictly). The dashboard loads in sections; if a call is rate limited, that section shows as a data gap with a retry button and everything already loaded stays cached. Peers are capped at four.
 
 ## Run FastAPI
 

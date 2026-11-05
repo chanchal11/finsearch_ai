@@ -59,7 +59,23 @@ bull = next((s for s in snapshot.scenarios if s.label == "Bull"), None)
 year_stats = charts.price_stats_frame(snapshot, 52)
 own_year = year_stats[year_stats["Ticker"] == snapshot.symbol] if not year_stats.empty else year_stats
 target_multiple = next((m for m in snapshot.multiples if m.is_target), None)
-peer_forward = [m.forward_pe for m in snapshot.multiples if not m.is_target and m.forward_pe]
+# Some data sources omit forward estimates; fall back to trailing P/E for the KPI.
+pe_attr, pe_label = (
+    ("forward_pe", "Forward P/E")
+    if any(m.forward_pe for m in snapshot.multiples)
+    else ("pe", "P/E (TTM)")
+)
+peer_forward = [
+    getattr(m, pe_attr) for m in snapshot.multiples if not m.is_target and getattr(m, pe_attr)
+]
+default_multiple = next(
+    (
+        label
+        for label, attribute in charts.MULTIPLES.items()
+        if any(getattr(m, attribute) for m in snapshot.multiples)
+    ),
+    "Forward P/E",
+)
 annual = snapshot.annual
 latest = annual[-1] if annual else None
 previous = annual[-2] if len(annual) > 1 else None
@@ -107,11 +123,11 @@ with row_one[2]:
         height="stretch",
     )
 with row_two[0]:
-    own_forward = target_multiple.forward_pe if target_multiple else None
+    own_forward = getattr(target_multiple, pe_attr) if target_multiple else None
     peer_median_forward = median(peer_forward) if peer_forward else None
     premium = own_forward / peer_median_forward - 1 if own_forward and peer_median_forward else None
     st.metric(
-        "Forward P/E",
+        pe_label,
         number(own_forward),
         delta=pct(premium, signed=True) if premium is not None else None,
         delta_color="inverse",
@@ -258,7 +274,7 @@ with left, st.container(border=True):
     metric = st.segmented_control(
         "Multiple",
         list(charts.MULTIPLES),
-        default="Forward P/E",
+        default=default_multiple,
         required=True,
         key="multiple_metric",
     )

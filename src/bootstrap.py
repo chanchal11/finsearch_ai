@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from src.agents.base import ChatAgentFactory, build_orchestrator_agent
 from src.config import Settings, get_settings
 from src.core.cache import InMemoryTTLCache
-from src.providers.alpha_vantage import AlphaVantageProvider
 from src.providers.cached import CachedFinancialProvider
+from src.providers.factory import build_financial_provider
 from src.providers.tavily_news import TavilyNewsProvider
 from src.services.chat_service import ChatService
 from src.services.committee_service import InvestmentCommitteeService
@@ -30,9 +30,10 @@ def build_context(settings: Settings | None = None) -> AppContext:
         default_ttl=settings.cache_default_ttl,
     )
     financial = CachedFinancialProvider(
-        AlphaVantageProvider(settings.alpha_vantage_api_key),
+        build_financial_provider(settings),
         cache,
         ttl=settings.cache_default_ttl,
+        namespace=settings.financial_source,
     )
     news = TavilyNewsProvider(settings.tavily_api_key)
     tools = build_tool_bundle(

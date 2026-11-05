@@ -14,17 +14,22 @@ T = TypeVar("T")
 class CachedFinancialProvider(IFinancialDataProvider):
     """Decorator that keeps vendor responses in the shared TTL cache.
 
-    The free Alpha Vantage tier allows only a handful of calls per minute, and the
-    DCF, ratio, snapshot, and chat tools all read the same statements. Caching at
-    the provider keeps every consumer inside that budget.
+    Vendors rate-limit requests, and the DCF, ratio, snapshot, and chat tools all
+    read the same statements. Caching at the provider keeps every consumer inside
+    that budget.
     """
 
     def __init__(
-        self, inner: IFinancialDataProvider, cache: ICacheProvider, ttl: int
+        self,
+        inner: IFinancialDataProvider,
+        cache: ICacheProvider,
+        ttl: int,
+        namespace: str = "fin",
     ) -> None:
         self._inner = inner
         self._cache = cache
         self._ttl = ttl
+        self._namespace = namespace
 
     def _cached(self, key: str, loader: Callable[[], T]) -> T:
         hit = self._cache.get(key)
@@ -34,9 +39,10 @@ class CachedFinancialProvider(IFinancialDataProvider):
         self._cache.set(key, value, ttl=self._ttl)
         return value.copy() if isinstance(value, pd.DataFrame) else value
 
-    @staticmethod
-    def _key(kind: str, symbol: str, extra: str = "") -> str:
-        return f"av:{kind}:{symbol.upper().strip()}:{extra}"
+    def _key(self, kind: str, symbol: str, extra: str = "") -> str:
+        # The namespace is the active vendor, so switching sources never serves
+        # another vendor's cached payload.
+        return f"{self._namespace}:{kind}:{symbol.upper().strip()}:{extra}"
 
     def get_balance_sheet(self, symbol: str, period: str) -> pd.DataFrame:
         return self._cached(
