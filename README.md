@@ -6,17 +6,29 @@ Production-oriented, **SOLID** multi-agent investment research engine built with
 
 ![Investment Committee Terminal — Streamlit UI](screenshots/investment-committee-terminal.png)
 
-The sidebar shows API configuration status and cache keys; the main panel accepts a ticker and peer set for a live multi-agent committee run.
+The sidebar holds the research target (ticker and peers), API configuration status, and cache keys. The app has three pages:
+
+| Page | What it does |
+| --- | --- |
+| **Dashboard** | Model-free research snapshot: KPI cards, rule-based "what stands out" flags, indexed price versus peers (6M / 1Y / 2Y), revenue / operating income / free cash flow, margin trend, earnings quality (net income versus free cash flow), bear/base/bull DCF against the market price, peer multiples with the peer median, and committee scores once the committee has run |
+| **Committee** | Streams the five-specialist investment committee (fundamental, news and sentiment, risk, valuation, market) and the Managing Director's rating table and executive brief. Scores are parsed from the report and charted on the Dashboard |
+| **Chat** | Follow-up questions grounded in the snapshot and the latest committee report, with tool access to statements, trends, DCF scenarios, peer multiples, price performance, and news |
 
 ## Architecture
 
 | Layer | Responsibility |
 | --- | --- |
-| `src/providers/` | Vendor adapters (`IFinancialDataProvider`, `INewsDataProvider`) |
+| `src/providers/` | Vendor adapters (`IFinancialDataProvider`, `INewsDataProvider`) plus `CachedFinancialProvider`, which keeps vendor responses in the TTL cache to stay inside API rate limits |
+| `src/domain/` | Plain dataclasses: `ResearchSnapshot`, `DcfResult`, committee scores, and rule-based insights |
 | `src/tools/` | Financial math & Markdown formatters (depend on interfaces only) |
-| `src/agents/` | Specialist personas + Managing Director orchestrator |
-| `src/services/` | Framework-agnostic `InvestmentCommitteeService` |
-| `app.py` / `api.py` | Delivery mechanisms (no business logic) |
+| `src/agents/` | Specialist personas, Managing Director orchestrator, and the research chat agent factory |
+| `src/services/` | Framework-agnostic `InvestmentCommitteeService`, `ResearchService` (snapshot), and `ChatService` |
+| `src/ui/` | Streamlit helpers: session state, charts, async-to-sync stream bridge |
+| `app.py` / `app_pages/` / `api.py` | Delivery mechanisms (no business logic) |
+
+### Chat history
+
+Chat transcripts live behind the `IChatStore` interface (`src/services/chat_store.py`). The default `InMemoryChatStore` is process-local; the Streamlit app keeps one store per browser session, so a refresh clears the conversation and users never see each other's threads. A database-backed store can replace it by implementing `load`, `append`, and `clear`.
 
 ## Setup (uv — recommended)
 
@@ -70,7 +82,9 @@ uv run streamlit run app.py
 
 PowerShell: same command (`uv run` works on Windows).
 
-Features: ticker + peers input, live token streaming, specialist tool status, cache inspection and purge.
+Features: shared ticker and peers input, decision dashboard, live committee streaming with specialist tool status, per-session research chat, cache inspection and purge.
+
+Alpha Vantage's free tier limits requests per minute. The dashboard loads in sections; if a call is rate limited, that section shows as a data gap with a retry button and everything already loaded stays cached. Peers are capped at four.
 
 ## Run FastAPI
 
@@ -80,8 +94,10 @@ uv run uvicorn api:app --reload --port 8000
 
 ### Endpoints
 
-- `POST /api/v1/evaluate` — synchronous JSON report
-- `GET /api/v1/evaluate/stream?symbol=AAPL&peers=MSFT,GOOGL` — SSE token/tool events
+- `POST /api/v1/evaluate` — synchronous JSON report (`metrics.scores` holds the parsed 1-10 scores and rating)
+- `GET /api/v1/evaluate/stream?symbol=AAPL&peers=MSFT,GOOGL` — SSE token/tool events, ending with a `scores` event
+- `GET /api/v1/snapshot?symbol=AAPL&peers=MSFT,GOOGL` — the research snapshot behind the dashboard (no model call)
+- `POST /api/v1/chat` — stateless chat. Send `{"symbol", "peers", "messages": [{"role", "content"}], "committee_report"?}`; the last message must be from the user. The client owns the transcript until a database is added
 - `DELETE /api/v1/cache` — purge TTL cache
 - `GET /health` — liveness
 

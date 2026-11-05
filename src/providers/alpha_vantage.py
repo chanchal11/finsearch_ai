@@ -102,3 +102,27 @@ class AlphaVantageProvider(IFinancialDataProvider):
             if "Note" in data:
                 raise AlphaVantageError(str(data["Note"]))
         raise AlphaVantageError(f"quote ({symbol}): could not parse price")
+
+    def get_weekly_prices(self, symbol: str) -> pd.DataFrame:
+        symbol = symbol.upper().strip()
+        data, _ = self._timeseries.get_weekly_adjusted(symbol=symbol)
+        if isinstance(data, dict):
+            for key in ("Note", "Error Message", "Information"):
+                if data.get(key):
+                    raise AlphaVantageError(f"weekly prices ({symbol}): {data[key]}")
+            raise AlphaVantageError(f"weekly prices ({symbol}): unexpected payload")
+        if not isinstance(data, pd.DataFrame) or data.empty:
+            raise AlphaVantageError(f"weekly prices ({symbol}): empty response")
+        close_col = next(
+            (c for c in data.columns if "adjusted close" in str(c).lower()),
+            next((c for c in data.columns if "close" in str(c).lower()), None),
+        )
+        if close_col is None:
+            raise AlphaVantageError(f"weekly prices ({symbol}): no close column")
+        frame = pd.DataFrame(
+            {
+                "date": pd.to_datetime(data.index),
+                "close": pd.to_numeric(data[close_col], errors="coerce"),
+            }
+        )
+        return frame.dropna().sort_values("date").reset_index(drop=True)

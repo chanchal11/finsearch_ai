@@ -21,6 +21,16 @@ class IFinancialDataProvider(ABC):
     @abstractmethod
     def get_latest_price(self, symbol: str) -> float: ...
 
+    @abstractmethod
+    def get_weekly_prices(self, symbol: str) -> pd.DataFrame:
+        """Weekly adjusted closes with columns ``date`` (datetime64) and ``close``, ascending."""
+        ...
+
+
+class IMarketDataProvider(ABC):
+    @abstractmethod
+    def get_weekly_prices(self, symbol: str) -> pd.DataFrame: ...
+
 
 class INewsDataProvider(ABC):
     @abstractmethod

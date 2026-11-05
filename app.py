@@ -1,110 +1,88 @@
 from __future__ import annotations
 
-import asyncio
-import queue
-import threading
-
 import streamlit as st
 
-from src.bootstrap import AppContext, build_context
-from src.services.committee_service import StreamEvent
+from src.ui.session import active_ticker, get_context, init_state, set_ticker
 
+st.set_page_config(
+    page_title="Investment Committee Terminal",
+    page_icon=":material/monitoring:",
+    layout="wide",
+)
 
-@st.cache_resource
-def get_context() -> AppContext:
-    return build_context()
+init_state()
 
-
-def _stream_tokens(symbol: str, peers: str):
-    """Bridge the async agent stream into Streamlit's sync generator.
-
-    The whole async generator must run inside one task. Stepping it with a
-    fresh ``run_until_complete`` per chunk copies the context each time, and
-    OpenTelemetry then fails to detach a token created in the previous context.
-    """
+try:
     ctx = get_context()
-    events: queue.Queue[StreamEvent | BaseException | None] = queue.Queue()
+except Exception as exc:  # noqa: BLE001
+    st.error(f"Startup failed: {exc}")
+    st.info("Configure `.env` using `.env.example` and restart the app.")
+    st.stop()
 
-    async def _produce() -> None:
-        try:
-            async for event in ctx.service.stream_evaluation(symbol, peers):
-                events.put(event)
-        except Exception as exc:
-            events.put(exc)
-        finally:
-            events.put(None)
-
-    thread = threading.Thread(target=lambda: asyncio.run(_produce()), daemon=True)
-    thread.start()
-    try:
-        while True:
-            item = events.get()
-            if item is None:
-                return
-            if isinstance(item, BaseException):
-                raise item
-            if item.type == "token":
-                yield item.data
-            elif item.type == "tool_start":
-                st.session_state.setdefault("tool_log", []).append(
-                    f"Specialist/tool invoked: **{item.data}**"
-                )
-    finally:
-        thread.join(timeout=1)
-
-
-def main() -> None:
-    st.set_page_config(
-        page_title="Investment Committee Terminal",
-        page_icon="📊",
-        layout="wide",
-    )
-    st.title("Investment Committee Terminal")
-    st.caption("Multi-agent research engine powered by Strands, Alpha Vantage, and Tavily.")
-
-    try:
-        ctx = get_context()
-    except Exception as exc:  # noqa: BLE001
-        st.error(f"Startup failed: {exc}")
-        st.info("Configure `.env` using `.env.example` and restart the app.")
-        return
-
-    with st.sidebar:
-        st.subheader("Configuration")
-        for name, ok in ctx.settings.api_key_status().items():
-            st.write(f"{'✅' if ok else '⚠️'} {name}")
-
-        st.subheader("Cache")
-        entries = ctx.cache.entries()
-        st.dataframe(entries, width="stretch", hide_index=True)
-        if st.button("Clear Cache", type="secondary"):
-            ctx.cache.clear()
-            st.success("Cache cleared.")
+with st.sidebar:
+    st.subheader("Research target")
+    with st.form("ticker_form", border=False):
+        symbol_input = st.text_input("Stock ticker", value=st.session_state["symbol"])
+        peers_input = st.text_input(
+            "Peers (comma-separated, up to 4)", value=st.session_state["peers"]
+        )
+        submitted = st.form_submit_button(
+            "Analyze", type="primary", icon=":material/search:", width="stretch"
+        )
+    if submitted:
+        if symbol_input.strip():
+            set_ticker(symbol_input, peers_input)
             st.rerun()
-
-    col1, col2 = st.columns(2)
-    with col1:
-        symbol = st.text_input("Stock ticker", value="AAPL").upper().strip()
-    with col2:
-        peers = st.text_input("Peers (comma-separated)", value="MSFT,GOOGL")
-
-    run = st.button("Run Investment Committee", type="primary")
-
-    if run:
-        if not symbol:
+        else:
             st.warning("Enter a ticker symbol.")
-            return
 
-        st.session_state["tool_log"] = []
-        with st.status("Investment Committee in Session...", expanded=True) as status:
-            for line in st.session_state.get("tool_log", []):
-                st.markdown(line)
-            streamed = st.write_stream(_stream_tokens(symbol, peers))
-            status.update(label="Committee session complete", state="complete")
+    if st.button(
+        "Clear cache and reload",
+        icon=":material/refresh:",
+        width="stretch",
+        help="Drops cached vendor data and rebuilds the dashboard on the next view.",
+    ):
+        ctx.cache.clear()
+        st.session_state.pop("snapshot", None)
+        st.rerun()
 
-        with st.expander("Final Report", expanded=True):
-            st.markdown(streamed)
+    with st.expander("Configuration"):
+        for name, ok in ctx.settings.api_key_status().items():
+            icon = ":material/check_circle:" if ok else ":material/warning:"
+            st.write(f"{icon} {name}")
 
+    with st.expander("Cache"):
+        st.dataframe(
+            ctx.cache.entries(),
+            width="stretch",
+            hide_index=True,
+            alt="Entries currently held in the in-memory data cache",
+        )
 
-if __name__ == "__main__":
-    main()
+page = st.navigation(
+    [
+        st.Page(
+            "app_pages/dashboard.py",
+            title="Dashboard",
+            icon=":material/monitoring:",
+            default=True,
+        ),
+        st.Page(
+            "app_pages/committee.py",
+            title="Committee",
+            icon=":material/groups:",
+        ),
+        st.Page("app_pages/chat.py", title="Chat", icon=":material/chat:"),
+    ],
+    position="top",
+)
+
+symbol, peers = active_ticker()
+st.title(page.title, icon=page.icon)
+st.caption(
+    f"Target **{symbol}**"
+    + (f" against peers {peers.replace(',', ', ')}" if peers else "")
+    + ". Research only, not investment advice."
+)
+
+page.run()

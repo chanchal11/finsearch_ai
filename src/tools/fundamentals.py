@@ -4,6 +4,7 @@ import pandas as pd
 
 from src.core.interfaces import IFundamentalProvider, IFinancialDataProvider
 from src.core.markdown import dataframe_to_markdown, dict_to_markdown
+from src.domain.snapshot import AnnualPoint
 
 
 def _coerce_float(value: object) -> float | None:
@@ -25,6 +26,105 @@ def _latest_row(df: pd.DataFrame) -> pd.Series:
         ordered = df.sort_values("fiscalDateEnding", ascending=False)
         return ordered.iloc[0]
     return df.iloc[0]
+
+
+def annual_history(
+    provider: IFundamentalProvider, symbol: str, years: int = 5
+) -> list[AnnualPoint]:
+    """Oldest-to-newest annual revenue, margin inputs, and cash flow for a ticker."""
+    income = provider.get_income_statement(symbol, "annual")
+    cashflow = provider.get_cash_flow(symbol, "annual")
+
+    cash_by_year: dict[str, pd.Series] = {}
+    if "fiscalDateEnding" in cashflow.columns:
+        for _, row in cashflow.iterrows():
+            cash_by_year[str(row["fiscalDateEnding"])[:4]] = row
+
+    if "fiscalDateEnding" in income.columns:
+        income = income.sort_values("fiscalDateEnding", ascending=False)
+    points: list[AnnualPoint] = []
+    for _, row in income.head(years).iterrows():
+        year = str(row.get("fiscalDateEnding", ""))[:4]
+        cash = cash_by_year.get(year)
+        operating_cf = _coerce_float(cash.get("operatingCashflow")) if cash is not None else None
+        capex = _coerce_float(cash.get("capitalExpenditures")) if cash is not None else None
+        fcf = operating_cf - abs(capex or 0.0) if operating_cf is not None else None
+        points.append(
+            AnnualPoint(
+                fiscal_year=year,
+                revenue=_coerce_float(row.get("totalRevenue")),
+                gross_profit=_coerce_float(row.get("grossProfit")),
+                operating_income=_coerce_float(row.get("operatingIncome")),
+                net_income=_coerce_float(row.get("netIncome")),
+                operating_cash_flow=operating_cf,
+                capex=abs(capex) if capex is not None else None,
+                free_cash_flow=fcf,
+            )
+        )
+    return list(reversed(points))
+
+
+def _fmt_money(value: float | None) -> str:
+    if value is None:
+        return "N/A"
+    magnitude = abs(value)
+    for unit, size in (("T", 1e12), ("B", 1e9), ("M", 1e6)):
+        if magnitude >= size:
+            return f"{value / size:,.2f}{unit}"
+    return f"{value:,.0f}"
+
+
+def _fmt_pct(value: float | None) -> str:
+    return f"{value * 100:.1f}%" if value is not None else "N/A"
+
+
+def fetch_financial_trends(
+    provider: IFundamentalProvider, symbol: str, years: int = 5
+) -> str:
+    """Multi-year margin and earnings-quality table for fundamental and risk work."""
+    symbol = symbol.upper().strip()
+    points = annual_history(provider, symbol, years)
+    if not points:
+        return f"## Financial Trends — {symbol}\n\n_No annual history available._"
+
+    table = (
+        "| Year | Revenue | Rev growth | Gross margin | Operating margin | Net margin "
+        "| Net income | Operating CF | FCF | FCF / Net income |\n"
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+    )
+    previous: AnnualPoint | None = None
+    for point in points:
+        growth = (
+            point.revenue / previous.revenue - 1
+            if previous and previous.revenue and point.revenue is not None
+            else None
+        )
+        conversion = point.cash_conversion
+        table += (
+            f"\n| {point.fiscal_year} | {_fmt_money(point.revenue)} | {_fmt_pct(growth)} "
+            f"| {_fmt_pct(point.gross_margin)} | {_fmt_pct(point.operating_margin)} "
+            f"| {_fmt_pct(point.net_margin)} | {_fmt_money(point.net_income)} "
+            f"| {_fmt_money(point.operating_cash_flow)} | {_fmt_money(point.free_cash_flow)} "
+            f"| {f'{conversion:.2f}x' if conversion is not None else 'N/A'} |"
+        )
+        previous = point
+
+    notes: list[str] = []
+    latest = points[-1]
+    if latest.cash_conversion is not None and latest.cash_conversion < 0.8:
+        notes.append(
+            "Latest free cash flow is below 80% of net income; check accruals and capex intensity."
+        )
+    if len(points) >= 2:
+        first, last = points[0], points[-1]
+        if (
+            first.operating_margin is not None
+            and last.operating_margin is not None
+            and last.operating_margin < first.operating_margin
+        ):
+            notes.append("Operating margin is lower than at the start of the window.")
+    body = "\n".join(f"- {note}" for note in notes) or "- No automatic flags raised."
+    return f"## Financial Trends — {symbol}\n\n{table}\n\n### Flags\n\n{body}"
 
 
 def fetch_income_statement(
